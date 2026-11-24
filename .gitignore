@@ -1,0 +1,28 @@
+# Python environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# IDE settings
+.idea/
+
+# macOS
+.DS_Store
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Datasets
+*.csv
+*.xlsx
+*.parquet
+
+# Generated models
+*.pkl
+*.joblib
+
+# Local vector database
+chroma_db/
