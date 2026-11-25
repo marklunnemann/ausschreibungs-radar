@@ -1,7 +1,21 @@
 
 from datasets import load_dataset
+import pandas as pd
 import re
 
+# ==========================================
+# 1. Konfiguration
+# ==========================================
+
+MAX_DATENSAETZE = 10000
+
+IT_BEREICHE = ("30", "32", "48", "50", "72")
+
+CPV_MUSTER = re.compile(r"\b\d{8}(?:-\d)?\b")
+
+# ==========================================
+# 2. Datenbeschaffung
+# ==========================================
 
 print("Lade deutsche Ausschreibungen aus 2023...")
 
@@ -15,92 +29,124 @@ daten = load_dataset(
 deutsche_daten = []
 
 for eintrag in daten:
+
     if eintrag["language"] == "DEU":
         deutsche_daten.append(eintrag)
 
-    if len(deutsche_daten) >= 1000:
+        if len(deutsche_daten) % 1000 == 0:
+            print(
+                f"Fortschritt: {len(deutsche_daten)}"
+                f" / {MAX_DATENSAETZE}"
+            )
+
+    if len(deutsche_daten) >= MAX_DATENSAETZE:
         break
 
-print(f"{len(deutsche_daten)} deutsche Ausschreibungen gefunden")
+print(f"\n{len(deutsche_daten)} deutsche Ausschreibungen gefunden")
 
-if deutsche_daten:
-    print("\nErste Ausschreibung:")
-    print(deutsche_daten[0]["text"][:500])
+# ==========================================
+# 3. DataFrame erstellen
+# ==========================================
 
-anzahl_cpv = 0
-
-for eintrag in deutsche_daten:
-    text = eintrag["text"]
-
-    # CPV-Codes mit oder ohne Prüfziffer suchen
-    codes = re.findall(r"\b\d{8}(?:-\d)?\b", text)
-
-    if codes:
-        anzahl_cpv += 1
-        print("Gefundene Codes:", codes[:5])
-
-print("\nCPV-Prüfung 2023:")
-print(f"Texte mit möglichen CPV-Codes: {anzahl_cpv}")
-print(f"Texte ohne Treffer: {len(deutsche_daten) - anzahl_cpv}")
-
-
-# Für unser IT-Systemhaus relevante CPV-Abteilungen
-it_bereiche = ("30", "32", "48", "50", "72")
-
-it_ausschreibungen = 0
-
-for eintrag in deutsche_daten:
-    codes = re.findall(
-        r"\b\d{8}(?:-\d)?\b",
-        eintrag["text"]
-    )
-
-    if any(code.startswith(it_bereiche) for code in codes):
-        it_ausschreibungen += 1
-
-print("\nErste IT-Klassifikation:")
-print(f"Potenziell IT-relevant: {it_ausschreibungen}")
-print(f"Nicht als IT-relevant erkannt: {len(deutsche_daten) - it_ausschreibungen}")
-
-
-print("\nPotenziell relevante IT-Ausschreibungen:")
-
-for eintrag in deutsche_daten:
-    codes = re.findall(
-        r"\b\d{8}(?:-\d)?\b",
-        eintrag["text"]
-    )
-
-    it_codes = [
-        code for code in codes
-        if code.startswith(it_bereiche)
-    ]
-
-    if it_codes:
-        print("\n----------------------------")
-        print("CPV-Kandidaten:", sorted(set(it_codes)))
-        print("Ausschreibung:")
-        print(eintrag["text"][:300])
-
-
-import pandas as pd
-
-# Ausschreibungen in DataFrame umwandeln
 df = pd.DataFrame(deutsche_daten)
 
-# Potenzielle IT-Relevanz bestimmen
-def ist_it_relevant(text):
-    codes = re.findall(r"\b\d{8}(?:-\d)?\b", text)
-    return any(code.startswith(it_bereiche) for code in codes)
+df["text"] = df["text"].fillna("")
 
-df["it_kandidat"] = df["text"].apply(ist_it_relevant)
+print("\nErste Ausschreibung:")
+print(df["text"].iloc[0][:500])
 
-# Ergebnisse speichern
+# ==========================================
+# 4. CPV-Kandidaten extrahieren
+# ==========================================
+
+cpv_kandidaten = df["text"].apply(
+    lambda text: sorted(set(CPV_MUSTER.findall(text)))
+)
+
+anzahl_cpv = cpv_kandidaten.apply(bool).sum()
+
+print("\nCPV-Prüfung 2023:")
+print("Texte mit möglichen CPV-Codes:", anzahl_cpv)
+print("Texte ohne Treffer:", len(df) - anzahl_cpv)
+
+print(
+    "CPV-Erkennungsquote:",
+    round(anzahl_cpv / len(df) * 100, 2),
+    "%"
+)
+
+# ==========================================
+# 5. Vorläufige IT-Klassifikation
+# ==========================================
+
+df["it_kandidat"] = cpv_kandidaten.apply(
+    lambda codes: any(
+        code.startswith(IT_BEREICHE)
+        for code in codes
+    )
+)
+
+it_anzahl = df["it_kandidat"].sum()
+
+print("\nErste IT-Klassifikation:")
+print("Potenziell IT-relevant:", it_anzahl)
+print("Nicht ausgewählt:", len(df) - it_anzahl)
+
+print(
+    "Anteil potenziell IT-relevant:",
+    round(it_anzahl / len(df) * 100, 2),
+    "%"
+)
+
+# ==========================================
+# 6. Explorative Datenanalyse
+# ==========================================
+
+print("\nTextlängen in Zeichen:")
+print(df["text"].str.len().describe().round(2))
+
+print("\nKlassenverteilung:")
+print(df["it_kandidat"].value_counts())
+
+print("\nProzentuale Klassenverteilung:")
+print(
+    df["it_kandidat"]
+    .value_counts(normalize=True)
+    .mul(100)
+    .round(2)
+)
+
+# ==========================================
+# 7. Beispielhafte IT-Kandidaten
+# ==========================================
+
+print("\nErste zehn potenzielle IT-Ausschreibungen:")
+
+for index, zeile in df[df["it_kandidat"]].head(10).iterrows():
+
+    it_codes = [
+        code for code in cpv_kandidaten.loc[index]
+        if code.startswith(IT_BEREICHE)
+    ]
+
+    print("\n----------------------------")
+    print("CPV-Kandidaten:", it_codes)
+    print("Ausschreibung:")
+    print(zeile["text"][:300])
+
+# ==========================================
+# 8. Datenexport
+# ==========================================
+
+dateiname = f"ausschreibungen_2023_{MAX_DATENSAETZE}.csv"
+
 df.to_csv(
-    "ausschreibungen_2023_1000.csv",
+    dateiname,
     index=False,
     encoding="utf-8-sig"
 )
 
-print("\nCSV-Datei gespeichert!")
-print(df["it_kandidat"].value_counts())
+print("\nCSV-Datei erfolgreich gespeichert!")
+print("Dateiname:", dateiname)
+print("Datensätze:", len(df))
+print("Spalten:", df.columns.tolist())
