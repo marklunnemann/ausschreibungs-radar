@@ -2,6 +2,14 @@
 import pandas as pd
 import re
 
+# Konfiguration
+MAX_DATENSAETZE = 10000
+
+EINGABEDATEI = f"ausschreibungen_2023_{MAX_DATENSAETZE}.csv"
+AUSGABEDATEI = f"ausschreibungen_2023_{MAX_DATENSAETZE}_aufbereitet.csv"
+
+CPV_MUSTER = re.compile(r"\b\d{8}(?:-\d)?\b")
+
 # Offizielles CPV-Verzeichnis öffnen
 excel_datei = pd.ExcelFile("cpv_2008_ver_2013.xlsx")
 
@@ -20,7 +28,6 @@ print(cpv_df.columns.tolist())
 
 print("\nErste fünf Datensätze:")
 print(cpv_df.head())
-
 
 # Relevante Spalten auswählen
 cpv_df = cpv_df[["CODE", "DE"]].copy()
@@ -49,11 +56,16 @@ print("\nAnzahl gültiger CPV-Hauptcodes:")
 print(len(gueltige_cpv_codes))
 
 # Ausschreibungsdatensatz einlesen
-df = pd.read_csv("ausschreibungen_2023_1000.csv")
+df = pd.read_csv(EINGABEDATEI)
+
+df["text"] = df["text"].fillna("")
+
+print("\nGeladene Datensätze:", len(df))
 
 # Funktion zur CPV-Extraktion und Validierung
 def extrahiere_cpv_codes(text):
-    kandidaten = re.findall(r"\b\d{8}(?:-\d)?\b", text)
+
+    kandidaten = CPV_MUSTER.findall(text)
 
     validierte_codes = set()
 
@@ -64,7 +76,6 @@ def extrahiere_cpv_codes(text):
             validierte_codes.add(hauptcode)
 
     return sorted(validierte_codes)
-
 
 # Funktion auf alle Ausschreibungstexte anwenden
 df["cpv_codes"] = df["text"].apply(extrahiere_cpv_codes)
@@ -113,7 +124,7 @@ ausgeschlossen = df[
 
 print("\nAusgeschlossene IT-Kandidaten:", len(ausgeschlossen))
 
-for _, zeile in ausgeschlossen.iterrows():
+for _, zeile in ausgeschlossen.head(10).iterrows():
     print("\n----------------------------")
     print("Dateiname:", zeile["filename"])
     print("Gültige CPV-Codes:", zeile["cpv_codes"])
@@ -147,8 +158,8 @@ cpv_haeufigkeit = cpv_haeufigkeit.merge(
     how="left"
 )
 
-print("\nGefundene IT-CPV-Codes mit Beschreibung:")
-print(cpv_haeufigkeit.to_string(index=False))
+print("\nDie 30 häufigsten IT-CPV-Codes:")
+print(cpv_haeufigkeit.head(30).to_string(index=False))
 
 
 # Präzisierte CPV-Bereiche für das IT-Systemhaus
@@ -181,7 +192,7 @@ ausgeschlossen_praezise = df[
 print("\nZusätzlich ausgeschlossene Kandidaten:")
 print(len(ausgeschlossen_praezise))
 
-for _, zeile in ausgeschlossen_praezise.iterrows():
+for _, zeile in ausgeschlossen_praezise.head(10).iterrows():
     print("\n----------------------------")
     print("Dateiname:", zeile["filename"])
     print("CPV-Codes:", zeile["cpv_codes"])
@@ -242,19 +253,73 @@ df["notice_id"] = df["filename"].str.extract(
 # Vorläufige Trainingslabels erstellen
 df["weak_label"] = df["it_kandidat_praezise"].astype(int)
 
+# Qualitätskontrolle
+print("\nQualitätskontrolle:")
+print("Fehlende Bekanntmachungs-IDs:",
+      df["notice_id"].isnull().sum())
+
+print("Doppelte Bekanntmachungs-IDs:",
+      df["notice_id"].duplicated().sum())
+
+print("Identische Ausschreibungstexte:",
+      df["text"].duplicated().sum())
+
+# Zeitliche Verteilung
+datum = pd.to_datetime(
+    df["date"],
+    format="%d/%m/%Y",
+    errors="coerce"
+)
+
+print("\nAusschreibungen nach Monat:")
+print(
+    datum.dt.to_period("M")
+    .value_counts()
+    .sort_index()
+)
+
+print("\nNicht erkannte Datumsangaben:")
+print(datum.isna().sum())
+
+# Zusammenfassung der Klassifikation
+print("\nZusammenfassung:")
+
+print("Ausschreibungen insgesamt:", len(df))
+print("Mit gültigen CPV-Codes:",
+      (df["cpv_anzahl"] > 0).sum())
+print("Ohne gültige CPV-Codes:",
+      (df["cpv_anzahl"] == 0).sum())
+
+print("IT-Kandidaten ursprünglich:",
+      df["it_kandidat"].sum())
+
+print("IT-Kandidaten validiert:",
+      df["it_kandidat_validiert"].sum())
+
+print("IT-Kandidaten präzisiert:",
+      df["it_kandidat_praezise"].sum())
+
 # Aufbereiteten Datensatz speichern
 df.to_csv(
-    "ausschreibungen_2023_aufbereitet.csv",
+    AUSGABEDATEI,
     index=False,
     encoding="utf-8-sig"
 )
 
 print("\nAufbereiteter Datensatz gespeichert!")
-
-print("\nAnzahl der Datensätze:", len(df))
+print("Dateiname:", AUSGABEDATEI)
+print("Anzahl der Datensätze:", len(df))
 
 print("\nVorläufige Labels:")
 print(df["weak_label"].value_counts())
+
+print("\nProzentuale Label-Verteilung:")
+print(
+    df["weak_label"]
+    .value_counts(normalize=True)
+    .mul(100)
+    .round(2)
+)
 
 print("\nSpalten des aufbereiteten Datensatzes:")
 print(df.columns.tolist())
