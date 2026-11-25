@@ -2,11 +2,31 @@
 import pandas as pd
 import re
 
-# Aufbereiteten Datensatz laden
-df = pd.read_csv("ausschreibungen_2023_aufbereitet.csv")
+# ==========================================
+# 1. Konfiguration
+# ==========================================
 
-# Datensatz überprüfen
-print("Anzahl der Datensätze:", len(df))
+MAX_DATENSAETZE = 10000
+
+EINGABEDATEI = (
+    f"ausschreibungen_2023_{MAX_DATENSAETZE}_aufbereitet.csv"
+)
+
+AUSGABEDATEI = (
+    f"ausschreibungen_2023_{MAX_DATENSAETZE}_nlp.csv"
+)
+
+CPV_MUSTER = r"\b\d{8}(?:-\d)?\b"
+
+# ==========================================
+# 2. Datensatz laden
+# ==========================================
+
+df = pd.read_csv(EINGABEDATEI)
+
+df["text"] = df["text"].fillna("")
+
+print("Geladene Datensätze:", len(df))
 
 print("\nTextlängen vor der Bereinigung:")
 print(df["text"].str.len().describe().round(2))
@@ -14,19 +34,28 @@ print(df["text"].str.len().describe().round(2))
 print("\nBeispiel eines unbearbeiteten Textes:")
 print(df["text"].iloc[0][:2000])
 
+# ==========================================
+# 3. Funktion zur Textbereinigung
+# ==========================================
 
-
-# Funktion zur Textbereinigung
 def bereinige_text(text):
 
     # URLs entfernen
-    text = re.sub(r"https?://\S+|www\.\S+", " ", text)
+    text = re.sub(
+        r"https?://\S+|www\.\S+",
+        " ",
+        text
+    )
 
     # E-Mail-Adressen entfernen
-    text = re.sub(r"\b[\w.+-]+@[\w.-]+\.\w+\b", " ", text)
+    text = re.sub(
+        r"\b[\w.+-]+@[\w.-]+\.\w+\b",
+        " ",
+        text
+    )
 
     # CPV-Codes und mögliche CPV-Kandidaten entfernen
-    text = re.sub(r"\b\d{8}(?:-\d)?\b", " ", text)
+    text = re.sub(CPV_MUSTER, " ", text)
 
     # Bekanntmachungs-IDs entfernen
     text = re.sub(
@@ -60,38 +89,60 @@ def bereinige_text(text):
 
     return text
 
-# Bereinigung auf alle Ausschreibungen anwenden
+# ==========================================
+# 4. Textbereinigung durchführen
+# ==========================================
+
+print("\nStarte Textbereinigung...")
+
 df["text_clean"] = df["text"].apply(bereinige_text)
 
-# Ergebnisse überprüfen
+df["text_clean_length"] = df["text_clean"].str.len()
+
 print("\nTextlängen nach der Bereinigung:")
-print(df["text_clean"].str.len().describe().round(2))
+print(df["text_clean_length"].describe().round(2))
 
 print("\nBeispiel eines bereinigten Textes:")
 print(df["text_clean"].iloc[0][:2000])
 
-print("\nLeere Texte nach der Bereinigung:")
-print(df["text_clean"].eq("").sum())
-
-
-# Qualitätskontrolle der Textbereinigung
-cpv_muster = r"\b\d{8}(?:-\d)?\b"
+# ==========================================
+# 5. Qualitätskontrolle
+# ==========================================
 
 cpv_vorher = df["text"].str.contains(
-    cpv_muster, regex=True
+    CPV_MUSTER, regex=True
 ).sum()
 
 cpv_nachher = df["text_clean"].str.contains(
-    cpv_muster, regex=True
+    CPV_MUSTER, regex=True
 ).sum()
 
+leere_texte = df["text_clean"].eq("").sum()
+
 print("\nQualitätskontrolle:")
+
 print("Texte mit CPV-Kandidaten vorher:", cpv_vorher)
 print("Texte mit CPV-Kandidaten nachher:", cpv_nachher)
+print("Leere bereinigte Texte:", leere_texte)
 
-# Die fünf längsten bereinigten Texte untersuchen
-df["text_clean_length"] = df["text_clean"].str.len()
+# Durchschnittliche Textlänge vergleichen
+mittelwert_vorher = df["text"].str.len().mean()
+mittelwert_nachher = df["text_clean_length"].mean()
 
+reduktion = (
+    1 - mittelwert_nachher / mittelwert_vorher
+) * 100
+
+print("\nDurchschnittliche Textlänge vorher:",
+      round(mittelwert_vorher, 2))
+
+print("Durchschnittliche Textlänge nachher:",
+      round(mittelwert_nachher, 2))
+
+print("Textreduktion in Prozent:",
+      round(reduktion, 2))
+
+# Die fünf längsten bereinigten Texte
 print("\nDie fünf längsten bereinigten Texte:")
 
 print(
@@ -100,34 +151,94 @@ print(
     ].to_string(index=False)
 )
 
+# ==========================================
+# 6. Leere Texte entfernen
+# ==========================================
 
-# Identische Texte nach der Bereinigung prüfen
-print("\nDoppelte bereinigte Texte:")
-print(df["text_clean"].duplicated().sum())
+df = df[df["text_clean"].ne("")].copy()
 
-# Die beiden längsten Texte vergleichen
-text_1 = df.loc[
-    df["notice_id"] == "687590-2023",
-    "text_clean"
-].iloc[0]
+# ==========================================
+# 7. Duplikatprüfung
+# ==========================================
 
-text_2 = df.loc[
-    df["notice_id"] == "688525-2023",
-    "text_clean"
-].iloc[0]
+print("\nDuplikatprüfung:")
 
-print("\nVergleich der beiden längsten Texte:")
-print("Texte identisch:", text_1 == text_2)
+print("Identische Originaltexte:",
+      df["text"].duplicated().sum())
 
-print("\nErste Bekanntmachung:")
-print(text_1[:1000])
+print("Identische bereinigte Texte:",
+      df["text_clean"].duplicated().sum())
 
-print("\nZweite Bekanntmachung:")
-print(text_2[:1000])
+duplikate = df[
+    df["text_clean"].duplicated(keep=False)
+].copy()
 
+print("Datensätze in Duplikatgruppen:",
+      len(duplikate))
 
-# Anzahl vor der Duplikatentfernung
+print("\nBeispiele identischer Dokumenttexte:")
+
+print(
+    duplikate[
+        ["notice_id", "text_clean_length", "weak_label"]
+    ].head(20).to_string(index=False)
+)
+
+# ==========================================
+# 8. Widersprüchliche Labels untersuchen
+# ==========================================
+
+label_varianten = (
+    duplikate.groupby("text_clean")["weak_label"]
+    .nunique()
+)
+
+konflikt_texte = label_varianten[
+    label_varianten > 1
+].index
+
+konflikte = df[
+    df["text_clean"].isin(konflikt_texte)
+].copy()
+
+print("\nLabel-Konflikte:")
+
+print("Duplikatgruppen mit widersprüchlichen Labels:",
+      len(konflikt_texte))
+
+print("Betroffene Datensätze:",
+      len(konflikte))
+
+if not konflikte.empty:
+
+    print(
+        konflikte[
+            ["notice_id", "weak_label", "text_clean_length"]
+        ].head(20).to_string(index=False)
+    )
+
+    # Konfliktfälle separat zur späteren Prüfung speichern
+    konflikte.to_csv(
+        f"label_konflikte_{MAX_DATENSAETZE}.csv",
+        index=False,
+        encoding="utf-8-sig"
+    )
+
+# ==========================================
+# 9. Konflikte und Duplikate entfernen
+# ==========================================
+
 anzahl_vorher = len(df)
+
+print("\nLabel-Verteilung vor der Duplikatentfernung:")
+print(df["weak_label"].value_counts())
+
+# Widersprüchlich gelabelte Texte ausschließen
+df = df[
+    ~df["text_clean"].isin(konflikt_texte)
+].copy()
+
+anzahl_nach_konflikten = len(df)
 
 # Identische bereinigte Texte entfernen
 df = df.drop_duplicates(
@@ -135,22 +246,64 @@ df = df.drop_duplicates(
     keep="first"
 ).reset_index(drop=True)
 
-print("\nDuplikatentfernung:")
-print("Datensätze vorher:", anzahl_vorher)
-print("Datensätze nachher:", len(df))
-print("Entfernte Duplikate:", anzahl_vorher - len(df))
+print("\nErgebnisse der Duplikatentfernung:")
 
-# Finalen NLP-Datensatz speichern
+print("Datensätze vorher:", anzahl_vorher)
+
+print("Entfernte Konfliktfälle:",
+      anzahl_vorher - anzahl_nach_konflikten)
+
+print("Entfernte weitere Duplikate:",
+      anzahl_nach_konflikten - len(df))
+
+print("Datensätze nachher:", len(df))
+
+print("Insgesamt entfernte Datensätze:",
+      anzahl_vorher - len(df))
+
+# ==========================================
+# 10. Finale Datenqualität
+# ==========================================
+
+print("\nFinale Qualitätskontrolle:")
+
+print("Verbleibende leere Texte:",
+      df["text_clean"].eq("").sum())
+
+print("Verbleibende identische Texte:",
+      df["text_clean"].duplicated().sum())
+
+print("Verbleibende CPV-Kandidaten:",
+      df["text_clean"].str.contains(
+          CPV_MUSTER, regex=True
+      ).sum())
+
+print("\nFinale Verteilung der Trainingslabels:")
+print(df["weak_label"].value_counts())
+
+print("\nProzentuale Label-Verteilung:")
+
+print(
+    df["weak_label"]
+    .value_counts(normalize=True)
+    .mul(100)
+    .round(2)
+)
+
+# ==========================================
+# 11. Datenexport
+# ==========================================
+
 df.to_csv(
-    "ausschreibungen_2023_nlp.csv",
+    AUSGABEDATEI,
     index=False,
     encoding="utf-8-sig"
 )
 
 print("\nNLP-Datensatz erfolgreich gespeichert!")
 
-print("\nVerteilung der vorläufigen Trainingslabels:")
-print(df["weak_label"].value_counts())
+print("Dateiname:", AUSGABEDATEI)
+print("Datensätze:", len(df))
 
 print("\nSpalten des NLP-Datensatzes:")
 print(df.columns.tolist())
