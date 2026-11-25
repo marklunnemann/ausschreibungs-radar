@@ -154,6 +154,27 @@ def evaluiere_modell(
         "Kandidaten": tp + fp
     }
 
+def analysiere_thresholds(
+    experiment,
+    modellname,
+    y_true,
+    scores
+):
+
+    for threshold in THRESHOLDS:
+
+        y_pred = (scores >= threshold).astype(int)
+
+        ergebnis = evaluiere_modell(
+            experiment,
+            modellname,
+            y_true,
+            y_pred
+        )
+
+        ergebnis["Threshold"] = threshold
+
+        threshold_ergebnisse.append(ergebnis)
 
 # ==========================================
 # 7. TF-IDF konfigurieren
@@ -272,6 +293,50 @@ def fuehre_experiment_durch(experiment, train_df):
         print("Recall:", round(ergebnis["Recall"], 3))
         print("F1:", round(ergebnis["F1"], 3))
 
+
+        # Threshold-Analyse für M4
+        if modellname == "M4 - Logistic Regression balanced":
+
+            scores_m4 = modell.predict_proba(
+                X_test_tfidf
+            )[:, 1]
+
+            analysiere_thresholds(
+                experiment,
+                "M4",
+                y_test,
+                scores_m4
+            )
+
+            # Textmerkmale von M4 speichern
+            feature_m4 = pd.DataFrame({
+                "Experiment": experiment,
+                "Modell": "M4",
+                "Merkmal": tfidf.get_feature_names_out(),
+                "Gewicht": modell.coef_[0]
+            })
+
+            feature_ergebnisse.append(feature_m4)
+
+            # Einzelne Vorhersagen speichern
+            vorhersagen_m4 = test_df[
+                ["notice_id", "text", "cpv_codes", "weak_label"]
+            ].copy()
+
+            vorhersagen_m4["Experiment"] = experiment
+            vorhersagen_m4["Modell"] = "M4"
+            vorhersagen_m4["IT_Score"] = scores_m4
+
+            vorhersagen_m4["Vorhersage_050"] = (
+                scores_m4 >= 0.50
+            ).astype(int)
+
+            vorhersagen_m4["Vorhersage_030"] = (
+                scores_m4 >= 0.30
+            ).astype(int)
+
+            vorhersage_ergebnisse.append(vorhersagen_m4)
+
     # ======================================
     # Optimierte TF-IDF-Vektorisierung
     # ======================================
@@ -337,6 +402,7 @@ def fuehre_experiment_durch(experiment, train_df):
         "Gewicht": lr_opt.coef_[0]
     })
 
+    feature_df["Modell"] = "M5"
     feature_ergebnisse.append(feature_df)
 
     print("\nTop 20 positive Textmerkmale:")
@@ -356,27 +422,17 @@ def fuehre_experiment_durch(experiment, train_df):
     )
 
     # ======================================
-    # 12. Threshold-Analyse
+    # 12. Threshold-Analyse M5
     # ======================================
 
     scores = lr_opt.predict_proba(X_test_opt)[:, 1]
 
-    for threshold in THRESHOLDS:
-
-        y_pred_threshold = (
-            scores >= threshold
-        ).astype(int)
-
-        ergebnis = evaluiere_modell(
-            experiment,
-            "M5",
-            y_test,
-            y_pred_threshold
-        )
-
-        ergebnis["Threshold"] = threshold
-
-        threshold_ergebnisse.append(ergebnis)
+    analysiere_thresholds(
+        experiment,
+        "M5",
+        y_test,
+        scores
+    )
 
     # ======================================
     # 13. Einzelne Vorhersagen speichern
@@ -395,6 +451,7 @@ def fuehre_experiment_durch(experiment, train_df):
     ).astype(int)
 
     vorhersage_ergebnisse.append(vorhersagen)
+    vorhersagen["Modell"] = "M5"
 
 
 # ==========================================
@@ -425,6 +482,7 @@ print(
     modell_df.round(3).to_string(index=False)
 )
 
+
 # ==========================================
 # 16. Threshold-Vergleich
 # ==========================================
@@ -435,21 +493,31 @@ print("\nTHRESHOLD-ANALYSE:")
 
 for experiment in threshold_df["Experiment"].unique():
 
-    print("\n", experiment)
+    for modellname in ["M4", "M5"]:
 
-    auswahl = threshold_df[
-        threshold_df["Experiment"] == experiment
-    ]
+        print("\n", experiment, "-", modellname)
 
-    print(
-        auswahl[
-            [
-                "Threshold", "Accuracy", "Precision",
-                "Recall", "F1", "TP", "FP",
-                "FN", "TN", "Kandidaten"
-            ]
-        ].round(3).to_string(index=False)
-    )
+        auswahl = threshold_df[
+            (threshold_df["Experiment"] == experiment)
+            & (threshold_df["Modell"] == modellname)
+        ]
+
+        print(
+            auswahl[
+                [
+                    "Threshold",
+                    "Accuracy",
+                    "Precision",
+                    "Recall",
+                    "F1",
+                    "TP",
+                    "FP",
+                    "FN",
+                    "TN",
+                    "Kandidaten"
+                ]
+            ].round(3).to_string(index=False)
+        )
 
 # ==========================================
 # 17. Direkter Leistungsvergleich
